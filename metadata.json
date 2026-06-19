@@ -1,0 +1,6 @@
+{
+  "name": "Beat Flow Music",
+  "description": "High-fidelity offline music player with custom EQ and gapless playback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
