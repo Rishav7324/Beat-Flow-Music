@@ -28,7 +28,9 @@ data class MusicPlayerState(
     val isLoading: Boolean = true,
     val currentPosition: Long = 0,
     val shuffleMode: Boolean = false,
-    val searchQuery: String = ""
+    val searchQuery: String = "",
+    val playbackSpeed: Float = 1.0f,
+    val pitch: Float = 1.0f
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -131,6 +133,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     
     fun seekTo(position: Long) {
         mediaController?.seekTo(position)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        mediaController?.let {
+            val currentParams = it.playbackParameters
+            it.playbackParameters = androidx.media3.common.PlaybackParameters(speed, currentParams.pitch)
+        }
+        _uiState.update { it.copy(playbackSpeed = speed) }
+    }
+
+    fun setPitch(pitch: Float) {
+        mediaController?.let {
+            val currentParams = it.playbackParameters
+            it.playbackParameters = androidx.media3.common.PlaybackParameters(currentParams.speed, pitch)
+        }
+        _uiState.update { it.copy(pitch = pitch) }
     }
 
     fun filterMusic(query: String) {

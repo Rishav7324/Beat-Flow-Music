@@ -1,5 +1,13 @@
 package com.example.ui
 
+import android.content.Context
+import android.media.AudioManager
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import android.Manifest
 import android.os.Build
 import androidx.compose.animation.*
@@ -93,7 +101,7 @@ fun PulseMusicApp(viewModel: MusicViewModel = viewModel()) {
                                 .clip(RoundedCornerShape(32.dp))
                                 .border(1.dp, MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(32.dp))
                         ) {
-                            val tabs = listOf("Songs" to Icons.Rounded.MusicNote, "Folders" to Icons.Rounded.Folder, "EQ" to Icons.Rounded.Tune, "Ads" to Icons.Rounded.MonetizationOn)
+                            val tabs = listOf("Songs" to Icons.Rounded.MusicNote, "Folders" to Icons.Rounded.Folder, "EQ" to Icons.Rounded.Tune, "Trim" to Icons.Rounded.ContentCut)
                             tabs.forEachIndexed { index, pair ->
                                 NavigationBarItem(
                                     icon = {
@@ -129,10 +137,8 @@ fun PulseMusicApp(viewModel: MusicViewModel = viewModel()) {
                         when (currentTab) {
                             0 -> SongList(state, viewModel)
                             1 -> FolderList(state, viewModel)
-                            2 -> EqualizerPlaceholder()
-                            3 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Button(onClick = { isAdExpanded = true }) { Text("Play Ad Simulation") }
-                            }
+                            2 -> EqualizerPlaceholder(state, viewModel)
+                            3 -> AudioTrimmerScreen(state.currentSong)
                         }
                     }
                 }
@@ -288,7 +294,7 @@ fun FolderList(state: MusicPlayerState, viewModel: MusicViewModel) {
 }
 
 @Composable
-fun EqualizerPlaceholder() {
+fun EqualizerPlaceholder(state: MusicPlayerState, viewModel: MusicViewModel) {
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -326,43 +332,46 @@ fun EqualizerPlaceholder() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Equalizer Active",
+                text = "Playback Controls",
                 style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black),
                 color = MaterialTheme.colorScheme.onBackground
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Lossless FLAC & DSP playback enabled.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            // Speed Control
+            Text("Speed: ${"%.1f".format(state.playbackSpeed)}x", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Slider(
+                value = state.playbackSpeed,
+                onValueChange = { viewModel.setPlaybackSpeed(it) },
+                valueRange = 0.5f..2.5f,
+                steps = 19,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary
+                )
             )
             
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             
-            // Premium Mock sliders
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                listOf(0.7f, 0.4f, 0.6f, 0.3f, 0.8f).forEach { initialValue ->
-                    var value by remember { mutableStateOf(initialValue) }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                                .width(6.dp)
-                                .height(100.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(value)
-                                    .align(Alignment.BottomCenter)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(MaterialTheme.colorScheme.primary)
-                            )
-                        }
-                    }
-                }
-            }
+            // Pitch Control
+            Text("Pitch: ${"%.1f".format(state.pitch)}x", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Slider(
+                value = state.pitch,
+                onValueChange = { viewModel.setPitch(it) },
+                valueRange = 0.5f..2.5f,
+                steps = 19,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary
+                )
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            val eqController = remember { MockEqualizerController() }
+            EqualizerComponent(controller = eqController)
         }
     }
 }
@@ -555,7 +564,27 @@ fun ExpandedPlayer(state: MusicPlayerState, viewModel: MusicViewModel, onClose: 
                 )
         )
 
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 48.dp)) {
+        val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+        val screenWidth = configuration.screenWidthDp
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .playerGestures(
+                    onSwipeLeft = { viewModel.skipNext() },
+                    onSwipeRight = { viewModel.skipPrevious() },
+                    onVolumeChange = { delta ->
+                        val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                        val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        val step = (maxVolume * 0.05f).coerceAtLeast(1f)
+                        val newVolume = (currentVolume + if (delta > 0) step else -step).toInt().coerceIn(0, maxVolume)
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, newVolume, AudioManager.FLAG_SHOW_UI)
+                    },
+                    screenWidth = screenWidth
+                )
+                .padding(horizontal = 32.dp, vertical = 48.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -583,23 +612,14 @@ fun ExpandedPlayer(state: MusicPlayerState, viewModel: MusicViewModel, onClose: 
             Spacer(modifier = Modifier.weight(1f))
             
             // Hero Album Art
-            Box(
+            VinylRecord(
+                isPlaying = state.isPlaying,
+                playbackSpeed = state.playbackSpeed,
+                uri = song.uri,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(40.dp))
-                    .background(Color.Black.copy(alpha=0.2f))
-                    .border(1.dp, Color.White.copy(alpha=0.2f), RoundedCornerShape(40.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                coil.compose.AsyncImage(
-                    model = song.uri,
-                    contentDescription = "Album Art",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    error = rememberVectorPainter(Icons.Rounded.GraphicEq)
-                )
-            }
+                    .padding(16.dp)
+            )
 
             Spacer(modifier = Modifier.height(64.dp))
 
